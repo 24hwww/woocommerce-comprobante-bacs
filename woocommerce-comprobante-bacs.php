@@ -35,6 +35,7 @@ if (!class_exists('Class_WC_CBACS_Diurvan')) {
     class Class_WC_CBACS_Diurvan{
         
         private static $_instance = null;
+		public $id;
         public $cbacs_id = '';
         public $option_group = '';
         
@@ -44,29 +45,74 @@ if (!class_exists('Class_WC_CBACS_Diurvan')) {
         }
         
         public function __construct() {
+			$this->id = "bacs";
             $this->cbacs_id = 'comprobante_bacs';
             $this->option_group = 'wc_cbacs_settings';
         }
     
         public static function init() {
             $instance = self::instance();
-            
+        
+			/* BACKEND */
+
+			add_action( 'admin_notices', [$instance, 'comprobante_bacs_admin_notice_func']);
+			add_filter( 'woocommerce_get_sections_checkout', [$instance, 'comprobante_bacs_add_section_func']);
+			add_filter( 'woocommerce_get_settings_checkout', [$instance, 'comprobante_bacs_settings_func'], 10, 2 );
+
+
+			/* FRONTEND */			
             add_filter('woocommerce_gateway_description',[$instance,'bacs_woocommerce_gateway_method_description_func'],10,2);
             add_action( 'woocommerce_checkout_update_order_meta', [$instance,'bacs_wc_upload_file_gateway_method_description_func'], 10, 3);
             
             add_action( 'add_meta_boxes', [$instance, 'comprobante_bacs_order_meta_boxes_func']);
             
             add_action( 'wp_footer', [$instance, 'js_scripts_comprobante_bacs_func'], 100 );
-        
-			add_filter( 'woocommerce_get_sections_checkout', [$instance, 'comprobante_bacs_add_section_func']);
-			add_filter( 'woocommerce_get_settings_checkout', [$instance, 'comprobante_bacs_settings_func'], 10, 2 );
-			
+        			
 			add_action('woocommerce_checkout_process', [$instance, 'validar_campo_carga_comprobante_func']);
 			add_action('woocommerce_after_checkout_validation', [$instance, 'wc_check_validando_checkout_func'], 10, 2 );
 			
 			add_filter('woocommerce_bacs_accounts', [$instance, 'ocultar_cuentas_bancarias_func'], 10, 2 );
 			
         }
+
+		public function bacs(){
+			global $woocommerce;
+			$installed_payment_methods = WC()->payment_gateways()->payment_gateways();
+			$bacs = isset($installed_payment_methods[$this->id]) ? $installed_payment_methods[$this->id] : '';
+			$data_bacs = !empty($bacs->settings) ? $bacs->settings : [];
+			return (object)$data_bacs;
+		}
+
+		public function bacs_activo(){
+			global $woocommerce;
+			$gateways = $woocommerce->payment_gateways->get_available_payment_gateways();
+			$gateway_bacs = isset($gateways[$this->id]) ? $gateways[$this->id] : '';
+			$gateway_bacs_enabled = !empty($gateway_bacs->enabled) ? $gateway_bacs->enabled : false;
+			return $gateway_bacs_enabled == 'yes' ? true : false;
+		}
+
+		public function comprobante_bacs_admin_notice_func(){
+			global $pagenow;
+			$screen = get_current_screen();
+			$get_page = !empty($screen->id) ? esc_attr($screen->id) : null;
+			$get_tab = isset($_GET['tab']) ? esc_attr($_GET['tab']) : null;
+			$get_section = isset($_GET['section']) ? esc_attr($_GET['section']) : null;
+
+			if($get_page !== 'woocommerce_page_wc-settings'){return false;}
+			if($get_tab !== 'checkout'){return false;}
+			if($get_section !== $this->cbacs_id){return false;}
+			if($this->bacs_activo() !== false){return false;}
+
+			$bacs = $this->bacs();
+			$bacs_title = !empty($bacs->title) ? $bacs->title : '';
+
+			$installed_payment_methods = WC()->payment_gateways()->payment_gateways();
+
+			$class = 'notice notice-error';
+			$message = sprintf("%s: <b>%s</b>", __( 'Tiene que activar el metodo de pago', 'default' ),$bacs_title);
+			printf( '<div class="%1$s"><p>%2$s</p></div>', esc_attr( $class ), $message);
+
+		}
 
         public function mime2ext($mime) {
             $mime_map = [
@@ -566,7 +612,7 @@ if (!class_exists('Class_WC_CBACS_Diurvan')) {
 			);
 
 			$settings_comprobante_bacs[] = array(
-				'name'     => __( 'Carga de imagen', 'woocommerce' ),
+				'name'     => __( 'Habilitar', 'woocommerce' ),
 				'desc_tip' => __( 'Carga de imagen comprobante en checkout', 'woocommerce' ),
 				'id'       => 'comprobante_bacs[enabled]',
 				'type'     => 'checkbox',
