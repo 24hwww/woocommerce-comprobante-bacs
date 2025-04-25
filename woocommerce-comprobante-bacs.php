@@ -228,7 +228,7 @@ if (!class_exists('WC_CBACS')) {
             <?php if($this->mostrar_cuentas() !== false): ?>
             <div class="woocommerce-additional-fields__field-wrapper">
                <div class="form-row form-row-wide">
-                    <label><strong>Cuentas disponibles</strong></label>
+                    <h3 id="order_review_heading"><?php echo __('Cuentas disponibles','default'); ?></h3>
                     <?php
                     if (!empty($accounts)) {
                         foreach ($accounts as $account) {
