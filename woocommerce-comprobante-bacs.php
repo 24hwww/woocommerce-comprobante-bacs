@@ -3,7 +3,7 @@
  * Plugin Name:       WooCommerce Comprobante BACS
  * Plugin URI:        https://github.com/24hwww/woocommerce-comprobante-bacs/
  * Description:       Attach an image as proof of payment for the bank transfer payment method.
- * Version:           1.10.1
+ * Version:           1.10.3
  * Requires at least: 6.5
  * Requires PHP:      8.0
  * Author:            24hwww
@@ -49,6 +49,7 @@ if (!class_exists('WC_CBACS')) {
             // Declare that this plugin supports WooCommerce HPOS.
             add_action('before_woocommerce_init', [$instance, 'supports_woocommerce_hpos_fn']);
             add_action('admin_init', [$instance, 'need_to_have_woocommerce_active_fn']);
+            add_filter( 'plugin_action_links_' . plugin_basename(__FILE__), [$instance, 'add_action_links_fn']);
 
             //Frontend
             add_filter('woocommerce_checkout_fields', [$instance, 'add_custom_woocommerce_billing_fields_fn']);
@@ -64,9 +65,13 @@ if (!class_exists('WC_CBACS')) {
             
             add_action( 'manage_shop_order_posts_custom_column', [$instance, 'display_info_bacs_in_table_column_func'], 25, 2 );
             add_action( 'manage_woocommerce_page_wc-orders_custom_column', [$instance, 'display_info_bacs_in_table_column_func'], 25, 2 );
+
+
+
             add_filter('woocommerce_settings_api_form_fields_bacs', [$instance, 'add_comprobante_bacs_setting_field_func']);
             add_action('woocommerce_update_options_bacs', [$instance, 'save_comprobante_bacs_setting_field_func']);
-            
+            add_action('woocommerce_checkout_create_order', [$instance, 'guardar_comprobante_en_orden_fn'], 20, 2);
+
             
 
         }
@@ -112,6 +117,19 @@ if (!class_exists('WC_CBACS')) {
                 return;
                 }
             endif;
+        } 
+
+        public function add_action_links_fn($actions){
+
+            $url_wc_tab = add_query_arg( array(
+                'page' => 'wc-settings',
+                'tab' => 'checkout',
+                'section' => 'bacs',
+            ), admin_url( 'admin.php') );
+
+            $links_personalizados[] = sprintf('<a href="%s">%s</a>',$url_wc_tab, __('Settings','default'));
+            $actions = array_merge( $actions, $links_personalizados );
+            return $actions;
         }
 
         public function compra_realizada_con_bacs($order_id=''){
@@ -149,9 +167,9 @@ if (!class_exists('WC_CBACS')) {
                     'return' => 'ids',
                     'meta_query' => array(
                         array(
-                            'key' => 'comprobante_bacs_num_operacion',
+                            'key' => '_comprobante_bacs_num_operacion',
                             'value' => $numero_operacion,
-                            'compare' => '=',
+                            'compare' => 'LIKE',
                         )
                     )
                 ));
@@ -165,6 +183,13 @@ if (!class_exists('WC_CBACS')) {
             $activar_carga_imagen = $activar_carga_imagen !== 'yes' ? false : true;
             return $activar_carga_imagen;
         }
+
+        public function mostrar_cuentas(){
+            $bacs = $this->bacs();
+            $mostrar_cuentas = !empty($bacs->enabled_show_accounts) ? $bacs->enabled_show_accounts : 'no';
+            $mostrar_cuentas = $mostrar_cuentas !== 'yes' ? false : true;
+            return $mostrar_cuentas;
+        }        
 
         /* Frontend */
 
@@ -195,12 +220,48 @@ if (!class_exists('WC_CBACS')) {
             if($id !== 'bacs'): return $description; endif;
             if(is_checkout() !== true): return $description; endif;
             if($this->bacs_activo() !== true): return $description; endif;
-            if($this->activar_carga_imagen() !== true): return $description; endif;
-
+            $accounts = get_option('woocommerce_bacs_accounts');
+        
             ob_start();
             ?>
 
-            <fieldset class="field-comprobante-bacs form-group"><label for="input_file_comprobante_bacs"><strong><?php echo __('Agregar comprobante de pago','woocommerce'); ?></strong><br/><input id="input_file_comprobante_bacs" name="billing_comprobante_bacs_file" class="form-control" type="file" accept="image/*"/><figure style="display:block;clear:both;max-width:300px;"><img id="comprobante_bacs_preview" style="max-width: 100%;max-height: inherit;margin:10px 0;padding: 0;"/></figure></label></fieldset>
+            <?php if($this->mostrar_cuentas() !== false): ?>
+            <div class="woocommerce-additional-fields__field-wrapper">
+               <div class="form-row form-row-wide">
+                    <label><strong>Cuentas disponibles</strong></label>
+                    <?php
+                    if (!empty($accounts)) {
+                        foreach ($accounts as $account) {
+                            $bank_name = isset($account['bank_name']) ? esc_html($account['bank_name']) : '';
+                            $account_number = isset($account['account_number']) ? esc_html($account['account_number']) : '';
+                            $account_name = isset($account['account_name']) ? esc_html($account['account_name']) : '';
+                            $iban = isset($account['iban']) ? esc_html($account['iban']) : '';
+                            $bic = isset($account['bic']) ? esc_html($account['bic']) : '';
+
+
+                            echo '<p>';
+                            echo $bank_name !== '' ? sprintf('<strong>%s:</strong> %s</br>',__( 'Bank', 'woocommerce' ), $bank_name) : '';
+                            echo $account_number !== '' ? sprintf('<strong>%s:</strong> %s</br>',__( 'Account number', 'woocommerce' ), $account_number) : '';
+                            echo $account_name !== '' ? sprintf('<strong>%s:</strong> %s</br>',__( 'Account name', 'woocommerce' ), $account_name) : '';
+                            echo $iban !== '' ? sprintf('<strong>%s:</strong> %s</br>',__( 'IBAN', 'woocommerce' ), $iban) : '';
+                            echo $bic !== '' ? sprintf('<strong>%s:</strong> %s',__( 'BIC', 'woocommerce' ), $bic) : '';
+                            echo '</p>';
+
+                            echo '<hr>';
+                        }
+                    }                    
+                    ?>
+               </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if($this->activar_carga_imagen() !== false): ?>
+            <fieldset style="margin:0;padding:0;border:none;" class="form-row form-row-wide field-comprobante-bacs form-group">
+                <label for="input_file_comprobante_bacs"><?php echo __('Agregar comprobante de pago','woocommerce'); ?>
+                <input id="input_file_comprobante_bacs" name="billing_comprobante_bacs_file" class="form-control input-text" type="file" accept="image/*"/>
+                <figure style="display:block;clear:both;max-width:300px;margin:0;padding:0;"><img id="comprobante_bacs_preview" style="max-width: 100%;max-height: inherit;margin:0;padding: 0;display:none;"/></figure></label>
+            </fieldset>
+            <?php endif; ?>
 
             <?php
             echo $description;
@@ -236,6 +297,14 @@ if (!class_exists('WC_CBACS')) {
                     var archivo = $(this)[0].files[0] || '';
                     if(archivo == ''){return false;}
 
+                    if (!input.files || input.files.length === 0) {
+                        // El usuario eliminó la selección o canceló
+                        image_preview.attr('src', '').hide();
+                        comprobante_bacs_imagen_formato.val('');
+                        comprobante_bacs_imagen_base64.val('');
+                        return;
+                    }                    
+
                     var filetype = archivo.type;
                     var filesize = archivo.size;
                     var filename = archivo.name;
@@ -244,7 +313,7 @@ if (!class_exists('WC_CBACS')) {
                         var data = e.target.result || '';
                         var base64String = data.replace('data:', '').replace(/^.+,/, '');
 
-                        image_preview.attr('src',data);
+                        image_preview.attr('src',data).show();
                         comprobante_bacs_imagen_formato.val(filetype);
                         comprobante_bacs_imagen_base64.val(base64String);
                         
@@ -403,8 +472,8 @@ if (!class_exists('WC_CBACS')) {
         }        
 
         public function save_order_meta_box_content_func($order_id, $order){
-            $comprobante_bacs_banco = isset($_POST['comprobante_bacs_banco']) ? esc_attr($_POST['comprobante_bacs_banco']) : [];
-            $comprobante_bacs_num_operacion = isset($_POST['comprobante_bacs_num_operacion']) ? intval($_POST['comprobante_bacs_num_operacion']) : [];
+            $comprobante_bacs_banco = isset($_POST['comprobante_bacs_banco']) ? esc_attr($_POST['comprobante_bacs_banco']) : '';
+            $comprobante_bacs_num_operacion = isset($_POST['comprobante_bacs_num_operacion']) ? intval($_POST['comprobante_bacs_num_operacion']) : '';
 
             $order->update_meta_data( 'comprobante_bacs_banco', $comprobante_bacs_banco );
             $order->update_meta_data( 'comprobante_bacs_num_operacion', $comprobante_bacs_num_operacion );
@@ -422,12 +491,14 @@ if (!class_exists('WC_CBACS')) {
                 $order_id = isset($_REQUEST['id']) ? intval($_REQUEST['id']) : false;
             }
 
+            if($this->compra_realizada_con_bacs($order_id) !== true): return false; endif;
+
             $order = wc_get_order($order_id);
             if ($order) {
 
                 $_comprobante_bacs_numero_operacion = $order->get_meta( 'comprobante_bacs_num_operacion', true );
 
-                if($this->numero_de_operacion_bacs_existe($order_id,$_comprobante_bacs_numero_operacion) !== true){ return false; }
+                if($this->numero_de_operacion_bacs_existe($order_id,$_comprobante_bacs_numero_operacion) !== false){ return false; }
 
                     echo '<div class="notice notice-error"><p>';
                     echo __("Ya existe una orden con el número de operación: <strong>{$_comprobante_bacs_numero_operacion}</strong>, edite el campo.", 'woocommerce');
@@ -448,14 +519,15 @@ if (!class_exists('WC_CBACS')) {
 
             $html_comprobante_bacs = '';
             
-            
                 $order = wc_get_order($order_id);
 
                 $_comprobante_bacs_banco = $order->get_meta( 'comprobante_bacs_banco', true );
                 $_comprobante_bacs_numero_operacion = $order->get_meta( 'comprobante_bacs_num_operacion', true );
 
                 $banco = $_comprobante_bacs_banco !== '' ? $_comprobante_bacs_banco : '—';
+                $banco = is_array($banco) ? implode('',$banco) : $banco;
                 $numero_operacion = $_comprobante_bacs_numero_operacion !== '' ? $_comprobante_bacs_numero_operacion : '—';
+                $numero_operacion = is_array($numero_operacion) ? implode('',$numero_operacion) : $numero_operacion;
 
                     $html_comprobante_bacs .= '<ul class="description">';
                     $html_comprobante_bacs .= sprintf('<li><strong>Banco:</strong> %1$s</li>',$banco);
@@ -466,6 +538,18 @@ if (!class_exists('WC_CBACS')) {
         }
 
         public function add_comprobante_bacs_setting_field_func($fields){
+            $fields['comprobante_bacs'] = array(
+                'title'       => __('Comprobante BACS', 'woocommerce'),
+                'type'        => 'title',
+                'desc' => __('--', 'woocommerce'),
+            );            
+            $fields['enabled_show_accounts'] = array(
+                'title'       => __('Mostrar cuentas en el checkout', 'woocommerce'),
+                'type'        => 'checkbox',
+                'description' => __('Mostrar en checkout las cuentas.', 'woocommerce'),
+                'default'     => '',
+                'desc_tip'    => true,
+            );
             $fields['enabled_upload_comprobante'] = array(
                 'title'       => __('Activar carga de imagen comprobante en el checkout', 'woocommerce'),
                 'type'        => 'checkbox',
@@ -478,8 +562,39 @@ if (!class_exists('WC_CBACS')) {
         }
 
         public function save_comprobante_bacs_setting_field_func(){
+            woocommerce_update_option('woocommerce_bacs_enabled_show_accounts');
             woocommerce_update_option('woocommerce_bacs_enabled_upload_comprobante');
         }
+
+        public function guardar_comprobante_en_orden_fn($order, $data){
+            if ($data['payment_method'] === 'bacs' && isset($_FILES['billing_comprobante_bacs_file'])) {
+                $file = $_FILES['billing_comprobante_bacs_file'];
+        
+                require_once(ABSPATH . 'wp-admin/includes/file.php');
+                require_once(ABSPATH . 'wp-admin/includes/media.php');
+                require_once(ABSPATH . 'wp-admin/includes/image.php');
+        
+                $upload = wp_handle_upload($file, array('test_form' => false));
+        
+                if (!isset($upload['error']) && isset($upload['file'])) {
+                    $wp_filetype = wp_check_filetype($upload['file'], null);
+                    $attachment = array(
+                        'post_mime_type' => $wp_filetype['type'],
+                        'post_title'     => sanitize_file_name($file['name']),
+                        'post_content'   => '',
+                        'post_status'    => 'inherit'
+                    );
+        
+                    $attach_id = wp_insert_attachment($attachment, $upload['file']);
+                    $attach_data = wp_generate_attachment_metadata($attach_id, $upload['file']);
+                    wp_update_attachment_metadata($attach_id, $attach_data);
+        
+                    // Asociar el archivo a la orden
+                    $order->add_meta_data('_comprobante_transferencia_id', $attach_id);
+                }
+            }
+        }
+
 
     }
     $GLOBALS["wc_bacs"] = WC_CBACS::instance();	
